@@ -4,15 +4,18 @@ import asyncio
 import time
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.responses import JSONResponse
 from concurrent.futures import TimeoutError as ConnectionTimeoutError
 from retell import Retell
 from custom_types import (
     ConfigResponse,
-    ResponseRequiredRequest, ResponseResponse,
+    ResponseRequiredRequest, ResponseResponse, Utterance
 )
 from llm import LlmClient  # or use .llm_with_func_calling
+from pydantic import BaseModel
+from typing import List, Optional
+
 
 load_dotenv(override=True)
 app = FastAPI()
@@ -226,3 +229,145 @@ async def websocket_handler(websocket: WebSocket, call_id: str):
             print(f"Error during WebSocket cleanup: {e}")
 
         print(f"WebSocket connection closed for call {call_id}")
+
+
+@app.websocket("/chat-websocket/{user_id}")
+async def chat_websocket_handler(websocket: WebSocket, user_id: str):
+    """
+    Handle WebSocket connections for chat functionality.
+    """
+    active_tasks = set()
+    llm_client = None
+    heartbeat_task = None
+
+    async def send_heartbeat():
+        """Send periodic heartbeats to keep the connection alive."""
+        try:
+            while True:
+                await websocket.send_json({
+                    "response_type": "ping_pong",
+                    "timestamp": int(time.time() * 1000)
+                })
+                await asyncio.sleep(20)  # Send heartbeat every 20 seconds
+        except Exception as e:
+            print(f"Heartbeat error: {e}")
+
+    try:
+        await websocket.accept()
+        llm_client = LlmClient()
+        response_id = 0
+
+        # Start heartbeat task
+        heartbeat_task = asyncio.create_task(send_heartbeat())
+
+        # Main message processing loop
+        while True:
+            try:
+                # Wait for messages with timeout
+                data = await asyncio.wait_for(websocket.receive_json(), timeout=30)
+
+                if data["type"] == "metadata":
+                    # Handle initial metadata
+                    metadata = {
+                        "call": {
+                            "retell_llm_dynamic_variables": {
+                                "user_id": user_id,
+                                "user_name": data.get("user_name"),
+                                "role": data.get("role"),
+                                "additional_info": data.get("additional_info")
+                            }
+                        }
+                    }
+                    llm_client.set_metadata(metadata)
+
+                    # Send initial greeting
+                    first_message = await llm_client.draft_begin_message()
+                    await websocket.send_json({
+                        "response_type": "message",
+                        "content": first_message.content,
+                        "content_complete": first_message.content_complete
+                    })
+
+                elif data["type"] == "message":
+                    response_id += 1
+                    # Create transcript from conversation history
+                    transcript = []
+                    for msg in data.get("conversation_history", []):
+                        transcript.append(
+                            Utterance(
+                                role="user" if msg["role"] == "user" else "agent",
+                                content=msg["content"]
+                            )
+                        )
+
+                    # Add current message
+                    transcript.append(
+                        Utterance(
+                            role="user",
+                            content=data["content"]
+                        )
+                    )
+
+                    # Create request and process
+                    request = ResponseRequiredRequest(
+                        interaction_type="response_required",
+                        response_id=response_id,
+                        transcript=transcript
+                    )
+
+                    # Process the request
+                    async for event in llm_client.draft_response(request):
+                        await websocket.send_json({
+                            "response_type": "message",
+                            "content": event.content,
+                            "content_complete": event.content_complete,
+                            "response_id": response_id
+                        })
+
+                elif data["type"] == "ping":
+                    await websocket.send_json({
+                        "response_type": "ping_pong",
+                        "timestamp": data["timestamp"]
+                    })
+
+            except asyncio.TimeoutError:
+                # Check connection with ping
+                try:
+                    await websocket.send_json({
+                        "response_type": "ping_pong",
+                        "timestamp": int(time.time() * 1000)
+                    })
+                except Exception:
+                    print("Connection dead after timeout")
+                    break
+
+            except WebSocketDisconnect:
+                print(f"WebSocket disconnected for user {user_id}")
+                break
+
+    except WebSocketDisconnect:
+        print(f"WebSocket disconnected for user {user_id}")
+    except Exception as e:
+        print(f"Unexpected error in WebSocket handler: {e}")
+    finally:
+        # Cleanup
+        if heartbeat_task:
+            heartbeat_task.cancel()
+            try:
+                await heartbeat_task
+            except asyncio.CancelledError:
+                pass
+
+        if active_tasks:
+            print(f"Canceling {len(active_tasks)} active tasks")
+            for task in active_tasks:
+                task.cancel()
+            await asyncio.gather(*active_tasks, return_exceptions=True)
+
+        if llm_client:
+            await llm_client.cleanup()
+
+        try:
+            await websocket.close()
+        except Exception as e:
+            print(f"Error during WebSocket cleanup: {e}")
