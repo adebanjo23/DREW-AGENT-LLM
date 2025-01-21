@@ -2,7 +2,7 @@ from openai import AsyncOpenAI
 import os
 import json
 import random
-from .custom_types import (
+from custom_types import (
     ResponseRequiredRequest,
     ResponseResponse,
     Utterance,
