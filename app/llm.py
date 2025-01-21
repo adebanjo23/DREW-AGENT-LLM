@@ -10,10 +10,10 @@ import json
 import os
 from dotenv import load_dotenv
 
-from .agent_prompt import agent_prompt
-from .calendar_integration import book_appointment
-from .google_search import find_places
-from .custom_types import (
+from agent_prompt import agent_prompt
+from calendar_integration import book_appointment
+from google_search import find_places
+from custom_types import (
     ResponseRequiredRequest,
     ResponseResponse,
     Utterance,
