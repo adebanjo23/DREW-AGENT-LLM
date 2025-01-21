@@ -56,11 +56,26 @@ jobs:
               --name fastapi-app-container \
               mayowaadebanjo/fastapi-app:latest
             
-            sleep 30
+            # Wait for container to start and verify it's running
+            echo "Waiting for container to start..."
+            sleep 10
             
-            if curl -sSf http://localhost:8000/health; then
-              echo "Deployment successful!"
-            else
-              echo "Health check failed"
+            if ! docker ps | grep -q fastapi-app-container; then
+              echo "Container failed to start"
+              docker logs fastapi-app-container
               exit 1
             fi
+            
+            # More comprehensive health check
+            for i in {1..12}; do
+              echo "Health check attempt $i..."
+              if curl -f http://localhost:8000/health; then
+                echo "Service is healthy!"
+                exit 0
+              fi
+              sleep 5
+            done
+            
+            echo "Service failed health check. Container logs:"
+            docker logs fastapi-app-container
+            exit 1
