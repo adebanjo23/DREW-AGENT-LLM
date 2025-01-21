@@ -10,10 +10,10 @@ import json
 import os
 from dotenv import load_dotenv
 
-from agent_prompt import agent_prompt
-from calendar_integration import book_appointment
-from google_search import find_places
-from custom_types import (
+from .agent_prompt import agent_prompt
+from .calendar_integration import book_appointment
+from .google_search import find_places
+from .custom_types import (
     ResponseRequiredRequest,
     ResponseResponse,
     Utterance,
@@ -293,7 +293,7 @@ class LlmClient:
                     # Casual & Friendly
                     f"{time_greeting}, {user_name}! Hope you're having a great day!",
                     f"Hey {user_name}, how's your day going?",
-                    f"Hi {user_name}, what's new?",
+                    f"Hi {user_name}, How's your day going?",
                     f"Good to see you, {user_name}! What's on your plate today?",
 
                     # Professional & Supportive
@@ -364,83 +364,79 @@ class LlmClient:
         user_context = ""
         total_leads = 0
 
-        if self.metadata:
-            if self.communications_data:
-                stats = self.communications_data.get('statistics', {})
-                recent_comms = self.communications_data.get('communications', [])
-                leads_data = self.communications_data.get('leads', [])
+        if self.metadata and self.communications_data:
+            metrics = self.communications_data.get('metrics', {})
 
-                # Format sample of leads (5 most recent)
-                lead_samples = []
-                total_leads = len(leads_data)
-                active_leads_count = sum(
-                    1 for lead in leads_data if lead.get('communication_counts', {}).get('total', 0) > 0)
-                inactive_leads_count = total_leads - active_leads_count
+            # Extract key metrics
+            call_metrics = metrics.get('call_metrics', {})
+            lead_metrics = metrics.get('lead_metrics', {})
+            appointment_data = metrics.get('appointments', {})
+            actionable_metrics = metrics.get('actionable_metrics', {})
 
-                for lead in leads_data[:5]:
-                    comm_counts = lead.get('communication_counts', {})
-                    lead_samples.append(
-                        f"- {lead['name']} ({lead['status']}): "
-                        f"{comm_counts.get('total', 0)} total communications "
-                        f"({comm_counts.get('drew', 0)} from Drew, {comm_counts.get('user', 0)} from agent)"
-                    )
+            # Format lead statistics
+            total_leads = lead_metrics.get('total_leads', 0)
+            leads_by_status = lead_metrics.get('leads_by_status', {})
 
-                # Format communication stats
-                type_counts = stats.get('counts_by_type', {})
-                success_rates = stats.get('success_rates', {})
+            # Format lead samples from latest interactions
+            lead_samples = []
+            latest_interactions = lead_metrics.get('latest_interactions', [])
+            for interaction in latest_interactions:
+                lead_samples.append(
+                    f"- {interaction.get('lead_name', 'Unknown')} "
+                    f"({interaction.get('type', 'Unknown interaction')}, "
+                    f"{interaction.get('status', 'Unknown status')}): "
+                    f"{interaction.get('details', {}).get('message', 'No details available')}"
+                )
 
-                # Format recent communications
-                total_communications = sum(type_counts.values())
-                recent_interactions = []
-                for comm in recent_comms[:5]:  # Last 5 communications
-                    comm_type = comm.get('type', '')
-                    details = comm.get('details', {})
-                    created_at = datetime.fromisoformat(comm.get('created_at', '')).strftime("%B %d at %I:%M %p")
-                    comm_source = "Drew" if "Drew" in comm.get('communication_type', '') else "Agent"
+            # Format most active lead
+            most_active_lead = lead_metrics.get('most_active_lead', {})
+            active_lead_info = ""
+            if most_active_lead:
+                active_lead_info = (
+                    f"\nMost Active Lead: {most_active_lead.get('name', 'Unknown')} "
+                    f"({most_active_lead.get('interaction_count', 0)} interactions)"
+                )
 
-                    if comm_type == 'SMS':
-                        recent_interactions.append(
-                            f"- {comm_source} sent SMS on {created_at}: {details.get('message', 'No message')}"
-                        )
-                    elif comm_type == 'EMAIL':
-                        recent_interactions.append(
-                            f"- {comm_source} sent Email on {created_at}: Subject: {details.get('subject', 'No subject')}"
-                        )
-                    elif comm_type == 'CALL':
-                        duration = comm.get('call', {}).get('duration', 0)
-                        duration_mins = duration // 60
-                        recent_interactions.append(
-                            f"- {comm_source} had {duration_mins} minute call on {created_at}: {details.get('notes', 'No notes')}"
-                        )
+            # Format recent appointments
+            recent_appointments = []
+            for apt in appointment_data.get('recent_appointments', []):
+                apt_time = datetime.fromisoformat(apt.get('appointment_time', '')).strftime("%B %d at %I:%M %p")
+                recent_appointments.append(
+                    f"- {apt_time}: {apt.get('status', 'Unknown status')} "
+                    f"({apt.get('participant_details', {}).get('name', 'Unknown participant')})"
+                )
 
-                # Format activity metrics
-                recent_activity = stats.get('recent_activity', {})
-                activity_summary = []
-                for date, count in recent_activity.items():
-                    formatted_date = datetime.fromisoformat(date).strftime("%B %d")
-                    activity_summary.append(f"- {formatted_date}: {count} communications")
-
-                # Build comprehensive context
-                user_context = f"""
+            # Build comprehensive context
+            user_context = f"""
     Recent Activity Overview:
-    Communications in the last 7 days:
-    {chr(10).join(activity_summary)}
-
-    Recent Interactions (showing 5 most recent out of {total_communications} total communications):
-    {chr(10).join(recent_interactions)}
-    Note: Full communication history is available in the dashboard.
+    Call Statistics:
+    - Total Calls: {call_metrics.get('total_calls', 0)}
+    - Successful Calls: {call_metrics.get('calls_by_status', {}).get('successful', 0)}
+    - Missed Calls: {call_metrics.get('calls_by_status', {}).get('missed', 0)}
+    - Average Call Duration: {call_metrics.get('average_duration', 0)} seconds
 
     Lead Overview:
-    Total Leads: {total_leads} ({active_leads_count} active, {inactive_leads_count} inactive)
-    Recent Lead Sample (showing 5 most recent leads):
-    {chr(10).join(lead_samples)}
-    Note: Complete lead information and history is accessible through the dashboard.
+    Total Leads: {total_leads}
+    Status Breakdown:
+    - New: {leads_by_status.get('new', 0)}
+    - Contacted: {leads_by_status.get('contacted', 0)}
+    - Qualified: {leads_by_status.get('qualified', 0)}
+    - Closed: {leads_by_status.get('closed', 0)}
+    {active_lead_info}
 
-    Communication Statistics:
-    - Total SMS: {type_counts.get('SMS', 0)} (Success rate: {success_rates.get('SMS', 0)}%)
-    - Total Emails: {type_counts.get('EMAIL', 0)} (Success rate: {success_rates.get('EMAIL', 0)}%)
-    - Total Calls: {type_counts.get('CALL', 0)} (Success rate: {success_rates.get('CALL', 0)}%)
-                """
+    Recent Interactions (last 5):
+    {chr(10).join(lead_samples)}
+
+    Recent Appointments:
+    {chr(10).join(recent_appointments)}
+    Upcoming Appointments: {appointment_data.get('upcoming_count', 0)}
+
+    Actionable Insights:
+    - New leads in last 30 days: {actionable_metrics.get('new_leads_last_30_days', 0)}
+    - Successful calls rate: {actionable_metrics.get('successful_calls_rate', 0)}%
+    - Average interactions per lead: {actionable_metrics.get('average_interactions_per_lead', 0)}
+    - Leads needing follow-up: {actionable_metrics.get('leads_needing_followup', 0)}
+    """
 
             personalized_context = f"""
     You're speaking with {self.metadata.get('user_name', 'an agent')}.
@@ -452,18 +448,17 @@ class LlmClient:
 
     Instructions:
     - Use this context to personalize your responses and make relevant suggestions
-    - Reference recent interactions when appropriate
-    - You can mention specific leads from the sample when relevant
-    - Be aware that you have access to all {total_leads} leads through the dashboard
-    - Consider both active and inactive leads in your responses
-    - Use communication patterns and success rates to inform suggestions
-    - Remember you can access full historical data if needed through the dashboard
+    - Reference specific appointments and upcoming meetings when relevant
+    - Prioritize leads needing follow-up in your recommendations
+    - Consider the call success rate when making suggestions about communication methods
+    - Use the lead status distribution to inform your strategy recommendations
+    - Pay attention to the most active lead and recent interactions
+    - Remember that the agent has access to full historical data through the dashboard
     """
 
         current_datetime = self.get_formatted_datetime()
         system_prompt = f"{agent_prompt}\n\nCurrent Date and Time: {current_datetime}\n\nPersonalized Context:\n{personalized_context}"
 
-        print(system_prompt)  # For debugging
         messages = [{"role": "system", "content": system_prompt}]
         transcript_messages = self.convert_transcript_to_messages(request.transcript)
         messages.extend(transcript_messages)
@@ -471,7 +466,7 @@ class LlmClient:
         if request.interaction_type == "reminder_required":
             messages.append({
                 "role": "user",
-                "content": "(Provide tailored recommendations based on the agent's preferences and recent activity:)"
+                "content": "(Provide tailored recommendations based on the agent's recent activity and pending follow-ups:)"
             })
         return messages
 
