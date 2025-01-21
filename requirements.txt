@@ -1,0 +1,10 @@
+anthropic
+fastapi
+groq
+langchain-core
+langchain-groq
+langchain-openai
+openai
+pytest
+python-dotenv
+requests
