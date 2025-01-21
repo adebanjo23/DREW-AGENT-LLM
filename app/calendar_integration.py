@@ -92,7 +92,7 @@ def book_appointment(
         timezone: Timezone for the event (default: UTC)
         description: Optional event description
         location: Optional event location
-        attendees: Optional list of attendee emails
+        attendees: Optional list of attendee emailss
 
     Returns:
         Dict with immediate acknowledgment
