@@ -19,6 +19,11 @@ app = FastAPI()
 retell = Retell(api_key=os.environ["RETELL_API_KEY"])
 
 
+@app.get("/health")
+async def health_check():
+    return {"status": "healthy"}
+
+
 # Handle webhook from Retell server. This is used to receive events from Retell server.
 # Including call_started, call_ended, call_analyzed
 @app.post("/webhook")
