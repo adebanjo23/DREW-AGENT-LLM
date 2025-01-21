@@ -13,13 +13,13 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy the current directory contents into the container at /app
 COPY . /app
 
-# Make port 8000 available to the world outside this container
-EXPOSE 8000
+# Make port 3000 available to the world outside this container
+EXPOSE 3000
 
 # Define environment variable
-ENV MODULE_NAME=app.main
+ENV MODULE_NAME=app.server
 ENV VARIABLE_NAME=app
-ENV PORT=8000
+ENV PORT=3000
 
-# Run app.py when the container launches
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Run server.py when the container launches
+CMD ["uvicorn", "app.server:app", "--host", "0.0.0.0", "--port", "3000"]

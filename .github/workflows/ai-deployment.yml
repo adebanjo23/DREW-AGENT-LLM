@@ -3,7 +3,7 @@ on:
   push:
     branches: [main]
     paths:
-      - ai-service/**
+      - app/**  # Changed from ai-service to app
       - .github/workflows/ai-deployment.yml
 
 jobs:
@@ -14,7 +14,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Build docker image
-        working-directory: ./ai-service
+        working-directory: ./app  # Changed from ai-service to app
         run: docker build -t mayowaadebanjo/fastapi-app .
 
       - name: Login to Docker Hub
@@ -34,25 +34,18 @@ jobs:
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
           script: |
-            # Clean up Docker
+            # Rest of the deployment script remains the same
             docker system prune -af
             docker volume prune -f
             
-            # Create network if it doesn't exist
             if ! docker network inspect app-network >/dev/null 2>&1; then
               docker network create app-network
             fi
             
-            # Login to Docker Hub
             echo ${{ secrets.DOCKER_AI_PASSWORD }} | docker login -u ${{ secrets.DOCKER_AI_USERNAME }} --password-stdin
-            
-            # Pull new image
             docker pull mayowaadebanjo/fastapi-app:latest
-            
-            # Remove old container
             docker rm -f fastapi-app-container || true
             
-            # Run new container
             docker run -d -p 8000:8000 \
               -e RETELL_API_KEY=${{ secrets.RETELL_API_KEY }} \
               -e RETELL_AGENT_ID=${{ secrets.RETELL_AGENT_ID }} \
@@ -62,10 +55,8 @@ jobs:
               --name fastapi-app-container \
               mayowaadebanjo/fastapi-app:latest
             
-            # Wait for container to start
             sleep 30
             
-            # Health check
             if curl -sSf http://localhost:8000/health; then
               echo "Deployment successful!"
             else
