@@ -168,7 +168,7 @@ class Settings:
             }
         ]
 
-        self.backend_url = "http://localhost:5000"
+        self.backend_url = "https://drewaibackend-git-admin1339.replit.app"
 
 
 settings = Settings()
