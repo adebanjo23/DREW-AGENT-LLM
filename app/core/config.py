@@ -165,6 +165,36 @@ class Settings:
                         "required": ["lead_name", "message_type", "message_content"]
                     }
                 }
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "PropertySearch",
+                    "description":
+                        """Search for properties in a given location with specific criteria.
+                        Use ONLY when:
+                        - User specifically asks about properties
+
+                        DO NOT use when:
+                        - Discussing general area information
+                        - Already have property information from previous search
+                        - Making casual conversation""",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "location": {
+                                "type": "string",
+                                "description": "Location to search for properties"
+                            },
+                            "status_type": {
+                                "type": "string",
+                                "description": "Status type: ForSale or ForRent",
+                                "default": "ForSale"
+                            }
+                        },
+                        "required": ["location"]
+                    }
+                }
             }
         ]
 

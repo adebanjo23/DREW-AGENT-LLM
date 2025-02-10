@@ -4,6 +4,8 @@ from app.tools_integration.google_search import find_places
 from pydantic import BaseModel, Field
 from datetime import datetime, timedelta
 
+from app.tools_integration.zillow_integration import search_properties
+
 
 class PlacesSearch(BaseModel):
     """Search for places near a specific location."""
@@ -178,3 +180,16 @@ class MessageRequest(BaseModel):
         except Exception as e:
             print(f"Error in sending message: {e}")
             raise
+
+
+class PropertySearch(BaseModel):
+    """Search for properties and provide property information in a specific location with given criteria."""
+    location: str = Field(..., description="Location to search for properties")
+    status_type: str = Field(default="ForSale", description="Status type: ForSale or ForRent")
+
+    async def execute(self) -> dict:
+        result = await search_properties(location=self.location, status_type=self.status_type)
+        props = result.get("properties", [])
+        if props:
+            return {"properties": [vars(prop) for prop in props]}
+        return result

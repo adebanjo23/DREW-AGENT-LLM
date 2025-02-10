@@ -5,7 +5,7 @@ import json
 import os
 from openai import AsyncOpenAI
 from dotenv import load_dotenv
-from app.models.models import PlacesSearch, BookingRequest, CallRequest, MessageRequest
+from app.models.models import PlacesSearch, BookingRequest, CallRequest, MessageRequest, PropertySearch
 from app.prompts.agent_prompt import agent_prompt
 from typing import List, Dict, Optional
 from datetime import datetime
@@ -141,24 +141,25 @@ class LlmClient:
             greeting = random.choice(custom_wait_variants)
         else:
             user_name = self.metadata.get('user_name', '')
+            bot_name = self.metadata.get('bot_name', 'Drew')
 
             if self.metadata.get('first_interaction') == "true":
                 custom_greeting = [
-                    f"{time_greeting}, {user_name}! Welcome aboard! I'm Drew, your personal assistant. I help manage leads, schedule appointments, track key metrics, and keep your workflow seamless. Let's get started!",
+                    f"{time_greeting}, {user_name}! Welcome aboard! I'm {bot_name}, your personal assistant. I help manage leads, schedule appointments, track key metrics, and keep your workflow seamless. Let's get started!",
 
-                    f"Hey {user_name}, great to have you here! I'm Drew, your AI-powered assistant. I'll help you stay organized by managing leads, scheduling, and tracking key performance metrics. Let's make things efficient!",
+                    f"Hey {user_name}, great to have you here! I'm {bot_name}, your AI-powered assistant. I'll help you stay organized by managing leads, scheduling, and tracking key performance metrics. Let's make things efficient!",
 
-                    f"{time_greeting}, {user_name}! I'm Drew, your virtual assistant. I handle lead management, scheduling, and performance tracking so you can focus on closing more deals.",
+                    f"{time_greeting}, {user_name}! I'm {bot_name}, your virtual assistant. I handle lead management, scheduling, and performance tracking so you can focus on closing more deals.",
 
-                    f"Welcome, {user_name}! I'm Drew, designed to help you streamline your workflow by managing leads, scheduling appointments, and keeping track of your business performance.",
+                    f"Welcome, {user_name}! I'm {bot_name}, designed to help you streamline your workflow by managing leads, scheduling appointments, and keeping track of your business performance.",
 
-                    f"Nice to meet you, {user_name}! I'm Drew, your smart assistant. I help you stay on top of leads, appointments, and key insights, making your workflow smoother and more efficient.",
+                    f"Nice to meet you, {user_name}! I'm {bot_name}, your smart assistant. I help you stay on top of leads, appointments, and key insights, making your workflow smoother and more efficient.",
 
-                    f"{time_greeting}, {user_name}! Congrats on getting started! I'm Drew, your AI assistant, here to help with lead tracking, scheduling, and performance insights. Let's get things rolling!",
+                    f"{time_greeting}, {user_name}! Congrats on getting started! I'm {bot_name}, your AI assistant, here to help with lead tracking, scheduling, and performance insights. Let's get things rolling!",
 
-                    f"Hey {user_name}! I'm Drew, your personal assistant! I'll handle scheduling, lead tracking, and key insights so you can focus on growing your business. Let's get started!",
+                    f"Hey {user_name}! I'm {bot_name}, your personal assistant! I'll handle scheduling, lead tracking, and key insights so you can focus on growing your business. Let's get started!",
 
-                    f"{time_greeting}, {user_name}! I'm Drew, your AI-powered real estate assistant. I'll keep your workflow organized, track your performance, and help you stay productive. Let's go!"
+                    f"{time_greeting}, {user_name}! I'm {bot_name}, your AI-powered real estate assistant. I'll keep your workflow organized, track your performance, and help you stay productive. Let's go!"
                 ]
             else:
                 custom_greeting = [
@@ -205,6 +206,8 @@ class LlmClient:
             result = await CallRequest(**args).execute(settings.backend_url, self.metadata.get('user_id'))
         elif tool_name == "MessageRequest":
             result = await MessageRequest(**args).execute(settings.backend_url, self.metadata.get('user_id'))
+        elif tool_name == "PropertySearch":  # Updated branch for PropertySearch
+            result = await PropertySearch(**args).execute()
         else:
             raise ValueError(f"Unknown tool: {tool_name}")
         return result
@@ -311,6 +314,7 @@ class LlmClient:
     """
 
             personalized_context = f"""
+    Your are {self.metadata.get('bot_name', 'Drew')}
     You're speaking with {self.metadata.get('user_name', 'an agent')}.
     Role: {self.metadata.get('role', 'Agent')}
     Additional Information: {self.metadata.get('additional_info', '')}
@@ -392,7 +396,6 @@ class LlmClient:
                         end_call=False,
                     )
 
-            # Process tool calls if any
             if current_tool_calls:
                 yield ResponseResponse(
                     response_id=request.response_id,
@@ -401,45 +404,38 @@ class LlmClient:
                     end_call=False,
                 )
 
-                # Execute all tool calls concurrently
+                # Execute all tool calls (ensuring each tool call gets a response message)
                 tool_results = []
                 for tool_call in current_tool_calls:
                     try:
                         args = json.loads(tool_call["function"]["arguments"])
-                        result = await self._execute_tool(
-                            tool_call["function"]["name"], args)
-                        tool_results.append({
-                            "tool_call_id":
-                                tool_call["id"],
-                            "role":
-                                "tool",
-                            "name":
-                                tool_call["function"]["name"],
-                            "content":
-                                json.dumps(result)
-                        })
+                        result = await self._execute_tool(tool_call["function"]["name"], args)
                     except Exception as e:
                         print(f"Tool execution error: {e}")
-                        yield ResponseResponse(
-                            response_id=request.response_id,
-                            content=
-                            "I encountered an issue while searching. Let me try a different approach. ",
-                            content_complete=False,
-                            end_call=False,
-                        )
+                        # Instead of only yielding a response, create a tool message with the error
+                        result = {"error": f"Error executing tool: {str(e)}"}
+                    # Append a tool message for every tool_call
+                    tool_results.append({
+                        "tool_call_id": tool_call["id"],
+                        "role": "tool",
+                        "name": tool_call["function"]["name"],
+                        "content": json.dumps(result)
+                    })
 
-                # Add tool results to messages and get final response
+                # Append the assistant message that includes the tool_calls field
                 messages.append({
                     "role": "assistant",
                     "content": current_content,
                     "tool_calls": current_tool_calls
                 })
+                # Append the tool response messages for each tool call
                 for result in tool_results:
                     messages.append(result)
 
-                # Get final response with tool results
+                # Get the final response that includes the tool results
                 final_response = await self.client.chat.completions.create(
-                    model="gpt-4o", messages=messages, stream=True)
+                    model="gpt-4o", messages=messages, stream=True
+                )
 
                 async for chunk in final_response:
                     if chunk.choices[0].delta.content:
