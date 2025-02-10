@@ -1,59 +1,22 @@
 import asyncio
 import random
-from datetime import datetime
-from typing import List, Dict, Optional
-
 import aiohttp
-from openai import AsyncOpenAI
-from pydantic import BaseModel, Field
 import json
 import os
+from openai import AsyncOpenAI
 from dotenv import load_dotenv
-
-from agent_prompt import agent_prompt
-from calendar_integration import book_appointment
-from google_search import find_places
-from custom_types import (
+from app.models.models import PlacesSearch, BookingRequest, CallRequest, MessageRequest
+from app.prompts.agent_prompt import agent_prompt
+from typing import List, Dict, Optional
+from datetime import datetime
+from app.utils.custom_types import (
     ResponseRequiredRequest,
     ResponseResponse,
     Utterance,
 )
+from app.core.config import settings
 
 load_dotenv()
-
-
-class PlacesSearch(BaseModel):
-    """Search for places near a specific location."""
-    location: str = Field(..., description="Location to search around")
-    query_type: str = Field(
-        ...,
-        description=
-        "Type of place to search for (e.g., restaurants, parks, schools)")
-
-    def execute(self) -> List[str]:
-        return find_places(self.location, self.query_type)
-
-
-class BookingRequest(BaseModel):
-    """Book an appointment with an agent."""
-    lead_name: str = Field(..., description="The name of the lead to be scheduled for the appointment")
-    start_time: str = Field(..., description="Start time in ISO format (YYYY-MM-DDTHH:MM:SS)")
-    location: Optional[str] = Field(None, description="A meeting location if meeting would be in-person")
-    description: Optional[str] = Field(None, description="A clear and detailed appointment description")
-
-    def execute(self, user_id: str, lead_id: str) -> dict:
-        # Parse the ISO format string to datetime
-        start_datetime = datetime.fromisoformat(self.start_time)
-        print(start_datetime, self.location, self.description, self.lead_name)
-
-        return book_appointment(
-            user_id=user_id,
-            lead_id=lead_id,
-            lead_name=self.lead_name,
-            start_time=start_datetime,
-            location=self.location,
-            description=self.description
-        )
 
 
 class LlmClient:
@@ -62,100 +25,9 @@ class LlmClient:
         self.client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
         self.call_id = None
         self.websocket_closed = False
-        self.tools = [{
-            "type": "function",
-            "function": {
-                "name": "PlacesSearch",
-                "description": """Search for places near a location.
-                    Use ONLY when:
-                    - Agent specifically asks about local amenities
-                    - You need to provide specific business/place names
-
-                    DO NOT use when:
-                    - Discussing general area features
-                    - Already have area information from previous search
-                    - Making casual conversation""",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "location": {
-                            "type": "string",
-                            "description": "Location to search around"
-                        },
-                        "query_type": {
-                            "type":
-                                "string",
-                            "description":
-                                "Type of place to search for (e.g., restaurants, parks, schools)"
-                        }
-                    },
-                    "required": ["location", "query_type"]
-                }
-            }
-        }, {
-            "type": "function",
-            "function": {
-                "name": "BookingRequest",
-                "description": """agent requests to book a specific appointment.
-                Use ONLY when:
-                - Agent specifically requests to schedule/book an appointment
-                - You have specific date/time information
-
-                DO NOT use when:
-                - Just discussing availability in general
-                - Making casual conversation
-                - Agent hasn't provided specific timing preferences""",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "lead_name": {
-                            "type": "string",
-                            "description": "The name of the lead to be scheduled for the appointment"
-                        },
-                        "start_time": {
-                            "type": "string",
-                            "description": "Start time in ISO format (YYYY-MM-DDTHH:MM:SS)"
-                        },
-                        "location": {
-                            "type": "string",
-                            "description": "A meeting location if meeting would be in-person"
-                        },
-                        "description": {
-                            "type": "string",
-                            "description": "A clear and detailed appointment description"
-                        }
-                    },
-                    "required": ["start_time"]
-                },
-            },
-        }]
-        self.opening_lines = [
-            "Hi, I'm Drew, your virtual real estate assistant. How can I help you today?",
-            "Hello, I'm Drew! Ready to assist with all your real estate needs. What can I do for you?",
-            "Hey there, I'm Drew! Looking for your dream home or need help with your listings?",
-            "Hi, I'm Drew. Let's find the perfect property or tackle your real estate tasks together!",
-            "Hello, I'm Drew, your AI assistant. Let's make your real estate journey smoother. What's on your mind?",
-            "Hi, I'm Drew! Here to help with buying, selling, or managing your real estate needs.",
-            "Hello, I'm Drew. Whether it's scheduling a showing or finding leads, I've got you covered!",
-            "Hi there, I'm Drew! Ready to help with everything from listings to leads. How can I assist?",
-            "Hey, I'm Drew, your personal real estate assistant. Let's get to work!",
-            "Hi, I'm Drew! Need help finding a home or managing your clients? Just say the word!"
-        ]
-        self.wait_variants = [
-            "Sure thing, just a sec.", "Hold on, let me check.",
-            "Got it, give me a moment.", "Of course, let me sort that out.",
-            "Alright, let me handle that.", "No problem, just a moment.",
-            "Okay, let me get that for you.", "One second, I’m on it.",
-            "Alright, let me take care of that.",
-            "Sure, just a bit of patience.", "Right away, hold tight.",
-            "Absolutely, hang on for a sec.", "Let me get to that real quick.",
-            "Certainly, one moment, please.",
-            "I’ll take care of it in just a second."
-        ]
         self.metadata: Optional[Dict] = None
         self.message_history: List[Dict[str, str]] = []
         self.conversations: Dict[str, List] = {}
-        self.backend_url = "https://drew-ai-backend-admin1339.replit.app"
         self.communications_data = {}
         self.is_first_interaction = True
 
@@ -163,7 +35,7 @@ class LlmClient:
         """Initialize communications data for the user."""
         try:
             async with aiohttp.ClientSession() as session:
-                url = f"{self.backend_url}/get_user_communications/{user_id}"
+                url = f"{settings.backend_url}/get_user_communications/{user_id}"
                 async with session.get(url) as response:
                     if response.status == 200:
                         self.communications_data = await response.json()
@@ -185,7 +57,7 @@ class LlmClient:
         """Fetch all user communications."""
         try:
             async with aiohttp.ClientSession() as session:
-                url = f"{self.backend_url}/get_user_communications/{user_id}"
+                url = f"{settings.backend_url}/get_user_communications/{user_id}"
                 async with session.get(url) as response:
                     if response.status == 200:
                         return await response.json()
@@ -211,7 +83,7 @@ class LlmClient:
                     }
                 }
 
-                url = f"{self.backend_url}/save_communication"
+                url = f"{settings.backend_url}/save_communication"
                 async with session.post(url, json=data) as response:
                     if response.status != 201:
                         print(f"Failed to save Drew communication. Status: {response.status}")
@@ -270,7 +142,7 @@ class LlmClient:
         else:
             user_name = self.metadata.get('user_name', '')
 
-            if self.metadata.get('first_interaction') is not None:
+            if self.metadata.get('first_interaction') == "true":
                 custom_greeting = [
                     f"{time_greeting}, {user_name}! Welcome aboard! I'm Drew, your personal assistant. I help manage leads, schedule appointments, track key metrics, and keep your workflow seamless. Let's get started!",
 
@@ -315,7 +187,7 @@ class LlmClient:
                     f"Hello, {user_name}. Need help with anything specific?"
                 ]
 
-            greeting = random.choice(custom_greeting) if user_name else random.choice(self.opening_lines)
+            greeting = random.choice(custom_greeting) if user_name else random.choice(settings.opening_lines)
 
         self.message_history.append({"role": "assistant", "content": greeting})
         return ResponseResponse(response_id=0,
@@ -328,11 +200,11 @@ class LlmClient:
         if tool_name == "PlacesSearch":
             result = await asyncio.to_thread(PlacesSearch(**args).execute)
         elif tool_name == "BookingRequest":
-            result = await asyncio.to_thread(
-                BookingRequest(**args).execute,
-                user_id=self.metadata.get('user_id'),
-                lead_id=self.metadata.get('lead_id')
-            )
+            result = await BookingRequest(**args).execute(settings.backend_url, self.metadata.get('user_id'))
+        elif tool_name == "CallRequest":
+            result = await CallRequest(**args).execute(settings.backend_url, self.metadata.get('user_id'))
+        elif tool_name == "MessageRequest":
+            result = await MessageRequest(**args).execute(settings.backend_url, self.metadata.get('user_id'))
         else:
             raise ValueError(f"Unknown tool: {tool_name}")
         return result
@@ -478,7 +350,7 @@ class LlmClient:
             response = await self.client.chat.completions.create(
                 model="gpt-4o",
                 messages=messages,
-                tools=self.tools,
+                tools=settings.tools,
                 tool_choice="auto",
                 temperature=0.3,
                 stream=True)
@@ -524,7 +396,7 @@ class LlmClient:
             if current_tool_calls:
                 yield ResponseResponse(
                     response_id=request.response_id,
-                    content=random.choice(self.wait_variants),
+                    content=random.choice(settings.wait_variants),
                     content_complete=False,
                     end_call=False,
                 )
@@ -633,7 +505,7 @@ class LlmClient:
                                             "call_id": self.call_id
                                         }
 
-                                        url = f"{self.backend_url}/save_communication"
+                                        url = f"{settings.backend_url}/save_communication"
                                         async with session.post(url, json=data) as response:
                                             if response.status != 201:
                                                 print(f"Failed to save call data. Status: {response.status}")

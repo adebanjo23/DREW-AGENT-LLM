@@ -8,11 +8,11 @@ from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect, HTTPExcept
 from fastapi.responses import JSONResponse
 from concurrent.futures import TimeoutError as ConnectionTimeoutError
 from retell import Retell
-from custom_types import (
+from app.utils.custom_types import (
     ConfigResponse,
     ResponseRequiredRequest, ResponseResponse, Utterance
 )
-from llm import LlmClient  # or use .llm_with_func_calling
+from app.src.llm import LlmClient  # or use .llm_with_func_calling
 from pydantic import BaseModel
 from typing import List, Optional
 
